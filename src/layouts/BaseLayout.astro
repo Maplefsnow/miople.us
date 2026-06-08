@@ -1,0 +1,48 @@
+---
+import '../styles/global.css';
+import Decor from '../components/Decor.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+  lang?: 'zh' | 'en' | null;
+  showLangSwitch?: boolean;
+  htmlLang?: string;
+}
+
+const {
+  title,
+  description = 'mio 和 maple 的可爱小站点',
+  lang = null,
+  showLangSwitch = false,
+  htmlLang = 'zh-CN',
+} = Astro.props;
+
+const canonical = new URL(Astro.url.pathname, Astro.site ?? 'https://miople.us').toString();
+---
+<!doctype html>
+<html lang={htmlLang}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:type" content="website" />
+    <meta name="generator" content={Astro.generator} />
+  </head>
+  <body>
+    <Decor />
+    <main class="container">
+      <Header lang={lang} showLangSwitch={showLangSwitch} />
+      <slot />
+      <Footer />
+    </main>
+  </body>
+</html>

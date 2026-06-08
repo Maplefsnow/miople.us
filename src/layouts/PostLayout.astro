@@ -1,0 +1,48 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import type { CollectionEntry } from 'astro:content';
+
+interface Props {
+  post: CollectionEntry<'posts'>;
+  prev?: { slug: string; title: string } | null;
+  next?: { slug: string; title: string } | null;
+}
+
+const { post, prev = null, next = null } = Astro.props;
+const { title, description, pubDate, lang, tags } = post.data;
+const dateLabel = pubDate.toISOString().slice(0, 10);
+const langLabel = lang === 'en' ? 'English' : '中文';
+const htmlLang = lang === 'en' ? 'en' : 'zh-CN';
+---
+<BaseLayout title={`${title} · Miople 的小窝`} description={description} htmlLang={htmlLang}>
+  <article class="card post-content">
+    <h1>{title}</h1>
+    <div class="post-meta">
+      <span class="lang-tag">{langLabel}</span>
+      <time datetime={pubDate.toISOString()}>{dateLabel}</time>
+      {tags.length > 0 && (
+        <span class="pill-row">
+          {tags.map((t) => <a class="name-pill" href={`/tags/${t}/`}>#{t}</a>)}
+        </span>
+      )}
+    </div>
+    <slot />
+  </article>
+
+  {(prev || next) && (
+    <nav class="post-nav" aria-label="文章导航">
+      {prev ? (
+        <a href={`/posts/${prev.slug}/`} class="prev">
+          <span class="label">← 上一篇</span>
+          <span class="title">{prev.title}</span>
+        </a>
+      ) : <span />}
+      {next ? (
+        <a href={`/posts/${next.slug}/`} class="next">
+          <span class="label">下一篇 →</span>
+          <span class="title">{next.title}</span>
+        </a>
+      ) : <span />}
+    </nav>
+  )}
+</BaseLayout>

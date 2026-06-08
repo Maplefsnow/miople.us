@@ -1,0 +1,36 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PostCard from '../components/PostCard.astro';
+
+const allPosts = (await getCollection('posts', ({ data }) => !data.draft)).sort(
+  (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf(),
+);
+
+const langParam = Astro.url.searchParams.get('lang');
+const lang = langParam === 'zh' || langParam === 'en' ? langParam : null;
+const posts = lang ? allPosts.filter((p) => p.data.lang === lang) : allPosts;
+---
+<BaseLayout
+  title="Miople 的小窝 · 博客"
+  description="mio 和 maple 的可爱小站点"
+  lang={lang}
+  showLangSwitch={true}
+>
+  <section class="card">
+    <h1>Miople 的小窝 ♡</h1>
+    <p>
+      欢迎来到我们的小天地！这里是 <strong>mio</strong> 和 <strong>maple</strong> 的温柔角落，
+      记录灵感、快乐和日常里闪闪发光的小事情。
+    </p>
+    <span class="badge">｡･:*:･ﾟ★ 和你分享可爱日常 ★ﾟ･:*:･｡</span>
+  </section>
+
+  {posts.length === 0 ? (
+    <section class="card">
+      <p class="muted">还没有文章呢，敬请期待 ✿</p>
+    </section>
+  ) : (
+    posts.map((post) => <PostCard post={post} />)
+  )}
+</BaseLayout>

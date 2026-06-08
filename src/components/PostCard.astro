@@ -1,0 +1,22 @@
+---
+import type { CollectionEntry } from 'astro:content';
+
+interface Props {
+  post: CollectionEntry<'posts'>;
+}
+const { post } = Astro.props;
+const { title, description, pubDate, lang, tags } = post.data;
+const dateLabel = pubDate.toISOString().slice(0, 10);
+const langLabel = lang === 'en' ? 'English' : '中文';
+---
+<a class="post-card" href={`/posts/${post.id.replace(/\.(md|mdx)$/, '')}/`}>
+  <h2>{title}</h2>
+  {description && <p class="muted">{description}</p>}
+  <div class="meta">
+    <span class="lang-tag">{langLabel}</span>
+    <time datetime={pubDate.toISOString()}>{dateLabel}</time>
+    {tags.length > 0 && (
+      <span>· {tags.map((t) => `#${t}`).join('  ')}</span>
+    )}
+  </div>
+</a>

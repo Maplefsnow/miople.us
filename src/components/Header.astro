@@ -1,0 +1,28 @@
+---
+interface Props {
+  lang?: 'zh' | 'en' | null;
+  showLangSwitch?: boolean;
+}
+const { lang = null, showLangSwitch = false } = Astro.props;
+const path = Astro.url.pathname;
+const isHome = path === '/' || path === '';
+const isTags = path.startsWith('/tags');
+const isAbout = path.startsWith('/about');
+---
+<header class="card site-header">
+  <h1 class="site-title">
+    <a href="/">Miople 的小窝 ♡</a>
+  </h1>
+  <nav class="nav" aria-label="主导航">
+    <a href="/" aria-current={isHome ? 'page' : undefined}>首页</a>
+    <a href="/tags" aria-current={isTags ? 'page' : undefined}>标签</a>
+    <a href="/about" aria-current={isAbout ? 'page' : undefined}>关于</a>
+  </nav>
+  {showLangSwitch && (
+    <div class="lang-switch" aria-label="语言筛选">
+      <a href="/" aria-current={!lang ? 'true' : undefined}>全部</a>
+      <a href="/?lang=zh" aria-current={lang === 'zh' ? 'true' : undefined}>中文</a>
+      <a href="/?lang=en" aria-current={lang === 'en' ? 'true' : undefined}>English</a>
+    </div>
+  )}
+</header>

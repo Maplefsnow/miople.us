@@ -1,0 +1,28 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const posts = await getCollection('posts', ({ data }) => !data.draft);
+const counts = new Map<string, number>();
+for (const post of posts) {
+  for (const tag of post.data.tags) {
+    counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  }
+}
+const tags = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+---
+<BaseLayout title="标签 · Miople 的小窝" description="按标签浏览文章">
+  <section class="card">
+    <h1>标签</h1>
+    <p class="muted">一共 {tags.length} 个标签</p>
+    <div class="pill-row" style="margin-top: 14px;">
+      {tags.length === 0 ? (
+        <p class="muted">还没有标签呢 ✿</p>
+      ) : (
+        tags.map(([tag, count]) => (
+          <a class="name-pill" href={`/tags/${tag}/`}>#{tag} <span class="muted">({count})</span></a>
+        ))
+      )}
+    </div>
+  </section>
+</BaseLayout>
