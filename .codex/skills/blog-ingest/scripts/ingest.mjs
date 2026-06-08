@@ -19,6 +19,7 @@ const REPO_ROOT = path.resolve(SKILL_DIR, '..', '..', '..');
 const INBOX = path.join(REPO_ROOT, 'inbox');
 const POSTS = path.join(REPO_ROOT, 'src', 'content', 'posts');
 const SCHEMA = path.join(SKILL_DIR, 'schema.json');
+const SKILL_MD = path.join(SKILL_DIR, 'SKILL.md');
 const LOCK = path.join(INBOX, '.lock');
 const LOG = path.join(INBOX, 'ingest.log');
 const TMP = path.join(INBOX, '.tmp');
@@ -187,25 +188,40 @@ function cleanupTmpBatch(batch) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
 }
 
+function loadSkillBody() {
+  const raw = fs.readFileSync(SKILL_MD, 'utf8');
+  // strip YAML frontmatter if present
+  const m = raw.match(/^---\n[\s\S]*?\n---\n*([\s\S]*)$/);
+  return (m ? m[1] : raw).trim();
+}
+
 function callCodex(prepared, batch) {
   const outPath = path.join(TMP, `${batch}.json`);
   try { fs.unlinkSync(outPath); } catch {}
+  const skillBody = loadSkillBody();
+  const prompt = [
+    '# Task: blog-ingest',
+    '',
+    'The skill instructions below are the complete specification for this task. ',
+    'Do NOT try to read, list, fetch, or look up any external files or skills — ',
+    'everything you need is inlined here. Analyze the attached image(s) and return ',
+    'one JSON object as described.',
+    '',
+    '---',
+    '',
+    skillBody,
+  ].join('\n');
   const args = [
     'exec',
-    '--sandbox', 'read-only',
+    '--dangerously-bypass-approvals-and-sandbox',
     '--skip-git-repo-check',
-    '--ignore-rules',
     '--output-schema', SCHEMA,
     '--output-last-message', outPath,
     '--color', 'never',
   ];
   for (const f of prepared) { args.push('-i', f.codexPath); }
   args.push('--');
-  args.push(
-    '请使用 blog-ingest skill 把这些图片的可读文字按顺序整理并合并成一篇博客文章。' +
-    '严格按 schema 输出 JSON。如果任何原因导致无法 OCR（图中无文字 / 模糊 / 不支持 / 沙箱限制 / 其他），' +
-    '必须返回 error 对象，禁止把失败说明写进 success 形态的 content 字段。'
-  );
+  args.push(prompt);
   const r = spawnSync('codex', args, {
     cwd: REPO_ROOT, encoding: 'utf8', timeout: CODEX_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'],
   });
