@@ -9,3 +9,7 @@ dist/
 *.log
 .vscode/
 .idea/
+
+inbox/*
+!inbox/.gitkeep
+!inbox/README.md
