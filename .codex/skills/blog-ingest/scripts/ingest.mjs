@@ -27,10 +27,24 @@ const FAILED = path.join(INBOX, 'failed');
 const HOME = process.env.HOME || '/home/mio';
 const SKILL_LINK = path.join(HOME, '.codex', 'skills', 'blog-ingest');
 
-const IMG_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.bmp', '.tiff']);
+const IMG_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.bmp', '.tiff']);
+const HEIC_EXTS = new Set(['.heic', '.heif']);
 const QUIET_MS = 60_000;
 const STALE_LOCK_MS = 30 * 60_000;
 const CODEX_TIMEOUT_MS = 5 * 60_000;
+const HEIF_CONVERT_TIMEOUT_MS = 60_000;
+// Defensive: codex may still try to write failure text into success-shaped
+// responses despite SKILL.md. If title/content matches one of these, we treat
+// it as a meta-failure and route to failed/ instead of publishing.
+const META_FAILURE_PATTERNS = [
+  /无法处理/, /无法识别/, /无法读取/, /无法分析/, /提取失败/, /识别失败/,
+  /无可读文字/, /没有可读文字/, /未检测到/, /不受支持/, /沙箱(限制|不可用)/,
+  /\bcannot (process|read|analyze|extract)\b/i,
+  /\bfailed to (extract|process|read|analyze)\b/i,
+  /\bunsupported (format|file)\b/i,
+  /\bno (readable )?text\b/i,
+  /\bsandbox (restriction|unavailable)\b/i,
+];
 
 process.env.HOME = HOME;
 process.env.PATH = [process.env.PATH, '/usr/local/bin', '/usr/bin', '/bin'].filter(Boolean).join(':');
@@ -135,7 +149,45 @@ function batchId(imgs) {
   return `${ts}-${h.digest('hex').slice(0, 8)}`;
 }
 
-function callCodex(imgs, batch) {
+function prepareImages(imgs, batch) {
+  const needsConvert = imgs.some((f) => HEIC_EXTS.has(path.extname(f.name).toLowerCase()));
+  if (needsConvert) {
+    const which = spawnSync('which', ['heif-convert'], { encoding: 'utf8' });
+    if (which.status !== 0) {
+      throw new Error('heif-convert not on PATH; install libheif-examples to handle HEIC/HEIF');
+    }
+  }
+  const tmpBatchDir = path.join(TMP, batch);
+  if (needsConvert) fs.mkdirSync(tmpBatchDir, { recursive: true });
+  const prepared = [];
+  for (const f of imgs) {
+    const ext = path.extname(f.name).toLowerCase();
+    if (!HEIC_EXTS.has(ext)) {
+      prepared.push({ name: f.name, codexPath: f.path, originalPath: f.path });
+      continue;
+    }
+    const jpegName = f.name.replace(/\.(heic|heif)$/i, '') + '.jpg';
+    const jpegPath = path.join(tmpBatchDir, jpegName);
+    const r = spawnSync('heif-convert', ['-q', '90', f.path, jpegPath], {
+      encoding: 'utf8', timeout: HEIF_CONVERT_TIMEOUT_MS,
+    });
+    if (r.status !== 0 || !fs.existsSync(jpegPath)) {
+      throw new Error(
+        `heif-convert failed for ${f.name}: ${(r.stderr || r.stdout || 'no output').trim().split('\n').slice(-1)[0]}`
+      );
+    }
+    log(`heif-convert ${f.name} → .tmp/${batch}/${jpegName}`, batch);
+    prepared.push({ name: f.name, codexPath: jpegPath, originalPath: f.path });
+  }
+  return prepared;
+}
+
+function cleanupTmpBatch(batch) {
+  const dir = path.join(TMP, batch);
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+}
+
+function callCodex(prepared, batch) {
   const outPath = path.join(TMP, `${batch}.json`);
   try { fs.unlinkSync(outPath); } catch {}
   const args = [
@@ -147,11 +199,12 @@ function callCodex(imgs, batch) {
     '--output-last-message', outPath,
     '--color', 'never',
   ];
-  for (const f of imgs) { args.push('-i', f.path); }
+  for (const f of prepared) { args.push('-i', f.codexPath); }
   args.push('--');
   args.push(
-    '请使用 blog-ingest skill 把这些图片的可读文字按顺序整理并合并成一篇博客文章，' +
-    '严格按 schema 输出 JSON 对象，不要任何额外文字。'
+    '请使用 blog-ingest skill 把这些图片的可读文字按顺序整理并合并成一篇博客文章。' +
+    '严格按 schema 输出 JSON。如果任何原因导致无法 OCR（图中无文字 / 模糊 / 不支持 / 沙箱限制 / 其他），' +
+    '必须返回 error 对象，禁止把失败说明写进 success 形态的 content 字段。'
   );
   const r = spawnSync('codex', args, {
     cwd: REPO_ROOT, encoding: 'utf8', timeout: CODEX_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'],
@@ -169,14 +222,23 @@ function parseAndValidate(outPath) {
     if (!m) throw new Error(`cannot parse JSON: ${e.message}`);
     obj = JSON.parse(m[0]);
   }
-  for (const k of ['title', 'lang', 'tags', 'description', 'content']) {
-    if (!(k in obj)) throw new Error(`missing field: ${k}`);
+  if (typeof obj === 'object' && obj && typeof obj.error === 'string' && obj.error) {
+    const reason = obj.error + (obj.detail ? ': ' + obj.detail : '');
+    throw new Error(`codex returned error: ${reason}`);
   }
   if (typeof obj.title !== 'string' || !obj.title.trim()) throw new Error('title empty');
   if (obj.lang !== 'zh' && obj.lang !== 'en') throw new Error(`bad lang: ${obj.lang}`);
   if (!Array.isArray(obj.tags) || obj.tags.length < 1) throw new Error('tags missing');
   if (typeof obj.content !== 'string') throw new Error('content not string');
   if (!obj.content.trim()) throw new Error('content empty (no_text)');
+  for (const field of [obj.title, obj.content, obj.description]) {
+    if (typeof field !== 'string') continue;
+    for (const pat of META_FAILURE_PATTERNS) {
+      if (pat.test(field)) {
+        throw new Error(`suspected meta-failure: matches /${pat.source}/`);
+      }
+    }
+  }
   return obj;
 }
 
@@ -210,11 +272,11 @@ function writePost(batch, result) {
   return file;
 }
 
-function archiveImages(imgs, destDir) {
+function archiveImages(prepared, destDir) {
   fs.mkdirSync(destDir, { recursive: true });
-  for (const f of imgs) {
+  for (const f of prepared) {
     const target = path.join(destDir, f.name);
-    fs.renameSync(f.path, target);
+    fs.renameSync(f.originalPath, target);
   }
 }
 
@@ -249,14 +311,24 @@ async function main() {
     const batch = batchId(imgs);
     log(`batch ${batch}: ${imgs.length} image(s): ${imgs.map(i => i.name).join(', ')}`, batch);
 
-    const cx = callCodex(imgs, batch);
+    let prepared;
+    try { prepared = prepareImages(imgs, batch); }
+    catch (e) {
+      log(`prepare failed: ${e.message}`, batch);
+      cleanupTmpBatch(batch);
+      return failBatch(imgs.map((f) => ({ name: f.name, originalPath: f.path })), batch, `prepare: ${e.message}`);
+    }
+
+    const cx = callCodex(prepared, batch);
     if (cx.error) {
       log(`codex spawn error: ${cx.error.message}`, batch);
-      return failBatch(imgs, batch, `spawn: ${cx.error.message}\nstdout:\n${cx.stdout}\nstderr:\n${cx.stderr}`);
+      cleanupTmpBatch(batch);
+      return failBatch(prepared, batch, `spawn: ${cx.error.message}\nstdout:\n${cx.stdout}\nstderr:\n${cx.stderr}`);
     }
     if (cx.code !== 0) {
       log(`codex exit ${cx.code}`, batch);
-      return failBatch(imgs, batch, `exit ${cx.code}\nstdout:\n${cx.stdout}\nstderr:\n${cx.stderr}`);
+      cleanupTmpBatch(batch);
+      return failBatch(prepared, batch, `exit ${cx.code}\nstdout:\n${cx.stdout}\nstderr:\n${cx.stderr}`);
     }
 
     let result;
@@ -264,16 +336,17 @@ async function main() {
     catch (e) {
       log(`validation failed: ${e.message}`, batch);
       let raw = ''; try { raw = fs.readFileSync(cx.outPath, 'utf8'); } catch {}
-      return failBatch(imgs, batch, `validate: ${e.message}\nraw:\n${raw}\nstderr:\n${cx.stderr}`);
+      cleanupTmpBatch(batch);
+      return failBatch(prepared, batch, `validate: ${e.message}\nraw:\n${raw}\nstderr:\n${cx.stderr}`);
     }
 
     const file = writePost(batch, result);
     log(`wrote ${path.relative(REPO_ROOT, file)} (title="${result.title}", lang=${result.lang}, tags=${result.tags.join('/')})`, batch);
 
-    archiveImages(imgs, path.join(PROCESSED, batch));
-    log(`archived ${imgs.length} image(s) to processed/${batch}`, batch);
+    archiveImages(prepared, path.join(PROCESSED, batch));
+    log(`archived ${prepared.length} image(s) to processed/${batch}`, batch);
 
-    const git = commitAndPush(batch, result, imgs.length);
+    const git = commitAndPush(batch, result, prepared.length);
     if (!git.ok) {
       log(`git ${git.where} failed: ${(git.msg || '').split('\n').slice(-1)[0]}`, batch);
       log(`md kept in working tree; next run will retry push`, batch);
@@ -281,6 +354,7 @@ async function main() {
       log(`committed + pushed`, batch);
     }
     try { fs.unlinkSync(cx.outPath); } catch {}
+    cleanupTmpBatch(batch);
     return 0;
   } catch (e) {
     log(`fatal: ${e.stack || e.message}`);
@@ -288,12 +362,14 @@ async function main() {
   }
 }
 
-function failBatch(imgs, batch, detail) {
+function failBatch(prepared, batch, detail) {
   const dest = path.join(FAILED, batch);
   try {
     fs.mkdirSync(dest, { recursive: true });
-    for (const f of imgs) {
-      try { fs.renameSync(f.path, path.join(dest, f.name)); } catch (e) { log(`failed to move ${f.name}: ${e.message}`, batch); }
+    for (const f of prepared) {
+      const src = f.originalPath;
+      if (!src || !fs.existsSync(src)) continue;
+      try { fs.renameSync(src, path.join(dest, f.name)); } catch (e) { log(`failed to move ${f.name}: ${e.message}`, batch); }
     }
     fs.writeFileSync(path.join(dest, 'error.log'), detail + '\n', 'utf8');
     log(`moved to failed/${batch}`, batch);

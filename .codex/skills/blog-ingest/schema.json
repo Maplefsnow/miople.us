@@ -1,17 +1,21 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["title", "lang", "tags", "description", "content"],
+  "required": ["title", "lang", "tags", "description", "content", "error", "detail"],
   "properties": {
-    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
-    "lang": { "type": "string", "enum": ["zh", "en"] },
+    "title": { "type": ["string", "null"], "maxLength": 200 },
+    "lang": { "type": ["string", "null"], "enum": ["zh", "en", null] },
     "tags": {
-      "type": "array",
+      "type": ["array", "null"],
       "items": { "type": "string", "minLength": 1, "maxLength": 40 },
-      "minItems": 1,
       "maxItems": 8
     },
-    "description": { "type": "string", "maxLength": 300 },
-    "content": { "type": "string" }
+    "description": { "type": ["string", "null"], "maxLength": 300 },
+    "content": { "type": ["string", "null"] },
+    "error": {
+      "type": ["string", "null"],
+      "enum": ["no_text", "unreadable", "unsupported", "other", null]
+    },
+    "detail": { "type": ["string", "null"], "maxLength": 500 }
   }
 }
