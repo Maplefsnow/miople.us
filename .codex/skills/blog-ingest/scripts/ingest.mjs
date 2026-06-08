@@ -55,7 +55,7 @@ for (const d of [INBOX, POSTS, TMP, PROCESSED, FAILED]) fs.mkdirSync(d, { recurs
 const log = (msg, batchId = '-') => {
   const line = `[${new Date().toISOString()}] [${batchId}] ${msg}\n`;
   fs.appendFileSync(LOG, line);
-  process.stdout.write(line);
+  if (process.stdout.isTTY) process.stdout.write(line);
 };
 
 function ensureSkillSymlink() {
@@ -296,7 +296,7 @@ async function main() {
   ensureSkillSymlink();
 
   if (!acquireLock()) {
-    process.stdout.write(`[${new Date().toISOString()}] [-] another ingest is running, exit\n`);
+    log('another ingest is running, exit');
     return 0;
   }
   process.on('exit', releaseLock);
