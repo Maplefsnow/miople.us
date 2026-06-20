@@ -1,15 +1,35 @@
+# dependencies
 node_modules/
+
+# build output & generated types
 dist/
 .astro/
-.claude/
+
+# package manager (repo standardizes on npm; ignore local pnpm artifacts)
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
+# logs
+*.log
+
+# environment variables
 .env
 .env.*
 !.env.example
-.DS_Store
-*.log
+
+# editors
 .vscode/
 .idea/
+*.swp
 
+# OS noise
+.DS_Store
+Thumbs.db
+
+# AI assistant local state
+.claude/
+
+# inbox pipeline runtime (track only the placeholder + docs)
 inbox/*
 !inbox/.gitkeep
 !inbox/README.md
